@@ -123,7 +123,7 @@ class _Executor implements Executor {
       _logInfo("Executor: cold start");
       return Cancelable.fromFuture(warmUp(log: _log))
           .next(onValue: (_) => executing());
-    } else if (_initializeCompleter.isCompleted) {
+    } else if (!_initializeCompleter.isCompleted) {
       _logInfo("Executor: workers not finished initializing");
       return Cancelable.fromFuture(warmUp(log: _log))
           .next(onValue: (_) => executing());
