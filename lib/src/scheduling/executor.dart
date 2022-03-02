@@ -32,6 +32,7 @@ abstract class Executor {
 class _Executor implements Executor {
   final _queue = PriorityQueue<Task>();
   final _pool = <Worker>[];
+  final Completer _initializeCompleter = Completer<void>();
 
   var _taskNumber = pow(-2, 53);
   var _log = false;
@@ -51,7 +52,8 @@ class _Executor implements Executor {
     if (_pool.isEmpty) {
       final processors = numberOfProcessors;
       isolatesCount ??= processors;
-      var processorsNumber = isolatesCount < processors ? isolatesCount : processors;
+      var processorsNumber =
+          isolatesCount < processors ? isolatesCount : processors;
       if (processorsNumber == 1) processorsNumber = 2;
       for (var i = 0; i < processorsNumber - 1; i++) {
         _pool.add(Worker());
@@ -59,6 +61,7 @@ class _Executor implements Executor {
       _logInfo('${_pool.length} has been spawned');
       await Future.wait(_pool.map((iw) => iw.initialize()));
       _logInfo('initialized');
+      this._initializeCompleter.complete();
     } else {
       _logInfo('all workers already initialized');
     }
@@ -97,8 +100,9 @@ class _Executor implements Executor {
         try {
           final runnable = task.runnable();
           if (runnable is Future<O>) {
-            runnable.then((data) => task.resultCompleter.complete(data)).onError(
-                (Object error, stackTrace) =>
+            runnable
+                .then((data) => task.resultCompleter.complete(data))
+                .onError((Object error, stackTrace) =>
                     task.resultCompleter.completeError(error, stackTrace));
           } else {
             task.resultCompleter.complete(runnable);
@@ -117,7 +121,12 @@ class _Executor implements Executor {
 
     if (_pool.isEmpty) {
       _logInfo("Executor: cold start");
-      return Cancelable.fromFuture(warmUp(log: _log)).next(onValue: (_) => executing());
+      return Cancelable.fromFuture(warmUp(log: _log))
+          .next(onValue: (_) => executing());
+    } else if (_initializeCompleter.isCompleted) {
+      _logInfo("Executor: workers not finished initializing");
+      return Cancelable.fromFuture(warmUp(log: _log))
+          .next(onValue: (_) => executing());
     }
     return executing();
   }
@@ -135,7 +144,8 @@ class _Executor implements Executor {
   }
 
   void _schedule() {
-    final availableIsolate = _pool.firstWhereOrNull((iw) => iw.runnableNumber == null);
+    final availableIsolate =
+        _pool.firstWhereOrNull((iw) => iw.runnableNumber == null);
     if (availableIsolate == null) {
       return;
     }
@@ -161,10 +171,12 @@ class _Executor implements Executor {
       _logInfo('task with number ${task.number} removed from queue');
       _queue.remove(task);
     } else {
-      final targetWorker = _pool.firstWhereOrNull((iw) => iw.runnableNumber == task.number);
+      final targetWorker =
+          _pool.firstWhereOrNull((iw) => iw.runnableNumber == task.number);
       if (targetWorker != null) {
         _logInfo('isolate with number ${targetWorker.runnableNumber} killed');
-        targetWorker.kill().then((_) => targetWorker.initialize().then((_) => _scheduleNext()));
+        targetWorker.kill().then(
+            (_) => targetWorker.initialize().then((_) => _scheduleNext()));
       }
     }
   }
